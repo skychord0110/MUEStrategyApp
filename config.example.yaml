@@ -1,0 +1,15 @@
+# 中継サーバの設定。config.yaml にコピーして使う（config.yaml は git 管理外）。
+
+# 閲覧を許す Tailscale のログイン名。tailscale serve が付ける
+# Tailscale-User-Login ヘッダーと照合する。確認方法: tailscale status / 管理画面の Users
+# 空のままだと誰も閲覧できない。
+allowed_logins:
+  - you@example.com
+
+# 以下は既定値のままでよい
+# mue_root: C:/Users/skych/OneDrive/デスクトップ/MUEStrategy   # 本番フォルダ（読むだけ）
+# db_path: data/app.db
+# host: 127.0.0.1          # ループバック以外は起動時に拒否する
+# port: 8765
+# ingest_interval_seconds: 60
+# account_stale_seconds: 90

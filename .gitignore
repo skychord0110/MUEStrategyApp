@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 取り込み先のDB（ログから作り直せるキャッシュ。口座情報を含むので管理しない）
+data/
+
+# 許可するTailscaleログイン名など、この端末固有の設定
+config.yaml
+
+# ローカル確認用の起動設定（端末固有のパスを含む）
+.claude/launch.json

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#141414">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MUE">
+<title>MUEStrategy</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <h1 id="title">状況</h1>
+  <span id="runner-badge" class="badge">—</span>
+</header>
+
+<main>
+  <!-- 状況 -->
+  <section id="view-home" class="view">
+    <div id="home-alert"></div>
+    <div class="card">
+      <div class="card-h">口座 <span id="acc-age" class="dim"></span></div>
+      <div class="kpis">
+        <div class="kpi"><div class="k">資産残高</div><div class="v" id="acc-total">—</div></div>
+        <div class="kpi"><div class="k">買付余力</div><div class="v" id="acc-bp">—</div></div>
+        <div class="kpi"><div class="k">評価損益</div><div class="v" id="acc-pl">—</div></div>
+      </div>
+      <div id="acc-positions"></div>
+    </div>
+    <div class="card">
+      <div class="card-h">自動売買</div>
+      <div id="autotrade"></div>
+    </div>
+    <div class="card">
+      <div class="card-h">本日の仮想売買</div>
+      <div class="kpis">
+        <div class="kpi"><div class="k">エントリー</div><div class="v" id="pt-entries">—</div></div>
+        <div class="kpi"><div class="k">保有中</div><div class="v" id="pt-holding">—</div></div>
+        <div class="kpi"><div class="k">損益率合計</div><div class="v" id="pt-ret">—</div></div>
+      </div>
+      <div id="pt-today"></div>
+    </div>
+    <div class="card">
+      <div class="card-h">本日の注文</div>
+      <div id="orders-today"></div>
+    </div>
+    <div class="card">
+      <div class="card-h">ストラテジー</div>
+      <div id="strategies"></div>
+    </div>
+    <div class="card">
+      <div class="card-h">本日の通知 <span id="err-count" class="dim"></span></div>
+      <div id="notices"></div>
+    </div>
+  </section>
+
+  <!-- 成績 -->
+  <section id="view-perf" class="view" hidden>
+    <div class="filters">
+      <div class="seg" id="perf-kind">
+        <button data-v="paper" class="on">仮想売買</button><button data-v="real">実売買</button>
+      </div>
+      <div class="seg" id="perf-range">
+        <button data-v="week">今週</button><button data-v="month" class="on">今月</button><button data-v="last">先月</button><button data-v="all">全期間</button><button data-v="custom">指定</button>
+      </div>
+      <div class="range" id="perf-custom" hidden>
+        <input type="date" id="perf-from"> 〜 <input type="date" id="perf-to">
+      </div>
+      <label class="check"><input type="checkbox" id="perf-est"> 推計(IF補完)を含める</label>
+    </div>
+    <div class="card">
+      <div class="card-h">累積損益率（%の単純合計） <span id="perf-period" class="dim"></span></div>
+      <div id="perf-chart" class="chart"></div>
+      <div id="perf-legend" class="legend"></div>
+    </div>
+    <div id="perf-list"></div>
+  </section>
+
+  <!-- 履歴 -->
+  <section id="view-trades" class="view" hidden>
+    <div class="filters">
+      <div class="seg" id="tr-kind">
+        <button data-v="paper" class="on">仮想売買</button><button data-v="real">実売買</button>
+      </div>
+      <div class="range">
+        <input type="date" id="tr-from"> 〜 <input type="date" id="tr-to">
+      </div>
+      <select id="tr-strategy"><option value="">すべてのストラテジー</option></select>
+    </div>
+    <div id="tr-list"></div>
+  </section>
+
+  <!-- 注文 -->
+  <section id="view-orders" class="view" hidden>
+    <div class="card">
+      <div class="card-h">本日の注文（口座から）</div>
+      <div id="orders-live"></div>
+    </div>
+    <div class="card">
+      <div class="card-h">発注・取消の記録（ログから）</div>
+      <div id="orders-history"></div>
+    </div>
+  </section>
+
+  <!-- レポート -->
+  <section id="view-reports" class="view" hidden>
+    <div id="rp-list"></div>
+    <div id="rp-body" class="card md" hidden></div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button data-view="home" class="on">状況</button>
+  <button data-view="perf">成績</button>
+  <button data-view="trades">履歴</button>
+  <button data-view="orders">注文</button>
+  <button data-view="reports">レポート</button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>
