@@ -57,6 +57,8 @@ cp config.example.yaml config.yaml   # allowed_logins に自分の Tailscale ロ
 ```
 
 起動は `start_server.bat`（または `.venv/Scripts/python -m server`）。
+MUEStrategy のコントロールパネルを開くと自動で起動する（MUEStrategy の
+`ui/mobile_server.py`。すでに動いていれば何もしない。出力は `data/server.log`）。
 初回は全ログの取り込みに数秒かかる。DBはログから作り直せるので、おかしくなったら
 `data/` を消して起動し直せばよい。
 
