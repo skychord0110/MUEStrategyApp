@@ -20,91 +20,119 @@
 </header>
 
 <main>
-  <!-- 状況 -->
+  <!-- 状況: 実売買と仮想売買を上下に分けて並べる -->
   <section id="view-home" class="view">
     <div id="home-alert"></div>
-    <div class="card">
-      <div class="card-h">口座 <span id="acc-age" class="dim"></span></div>
-      <div class="kpis">
-        <div class="kpi"><div class="k">資産残高</div><div class="v" id="acc-total">—</div></div>
-        <div class="kpi"><div class="k">買付余力</div><div class="v" id="acc-bp">—</div></div>
-        <div class="kpi"><div class="k">評価損益</div><div class="v" id="acc-pl">—</div></div>
+
+    <div class="zone real">
+      <div class="zone-h"><span class="kind-tag real">実売買</span>実際の口座・お金が動く</div>
+      <div class="card">
+        <div class="card-h">口座 <span id="acc-age" class="dim"></span></div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">資産残高</div><div class="v" id="acc-total">—</div></div>
+          <div class="kpi"><div class="k">買付余力</div><div class="v" id="acc-bp">—</div></div>
+          <div class="kpi"><div class="k">評価損益</div><div class="v" id="acc-pl">—</div></div>
+        </div>
       </div>
-      <div id="acc-positions"></div>
-    </div>
-    <div class="card">
-      <div class="card-h">自動売買</div>
-      <div id="autotrade"></div>
-    </div>
-    <div class="card">
-      <div class="card-h">本日の仮想売買</div>
-      <div class="kpis">
-        <div class="kpi"><div class="k">エントリー</div><div class="v" id="pt-entries">—</div></div>
-        <div class="kpi"><div class="k">保有中</div><div class="v" id="pt-holding">—</div></div>
-        <div class="kpi"><div class="k">損益率合計</div><div class="v" id="pt-ret">—</div></div>
+      <div class="card">
+        <div class="card-h">建玉 <span id="home-pos-count" class="dim"></span></div>
+        <div id="home-positions"></div>
       </div>
-      <div id="pt-today"></div>
+      <div class="card">
+        <div class="card-h">自動売買</div>
+        <div id="autotrade"></div>
+      </div>
+      <div class="card">
+        <div class="card-h">本日の注文 <span id="orders-today-at" class="dim"></span></div>
+        <div id="orders-today"></div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-h">本日の注文</div>
-      <div id="orders-today"></div>
+
+    <div class="zone paper">
+      <div class="zone-h"><span class="kind-tag paper">仮想売買</span>シミュレーション・発注なし</div>
+      <div class="card">
+        <div class="card-h">本日</div>
+        <div class="kpis">
+          <div class="kpi"><div class="k">エントリー</div><div class="v" id="pt-entries">—</div></div>
+          <div class="kpi"><div class="k">保有中</div><div class="v" id="pt-holding">—</div></div>
+          <div class="kpi"><div class="k">損益率合計</div><div class="v" id="pt-ret">—</div></div>
+        </div>
+        <div id="pt-today"></div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-h">ストラテジー</div>
-      <div id="strategies"></div>
-    </div>
-    <div class="card">
-      <div class="card-h">本日の通知 <span id="err-count" class="dim"></span></div>
-      <div id="notices"></div>
+
+    <div class="zone">
+      <div class="zone-h">ランナー</div>
+      <div class="card">
+        <div class="card-h">ストラテジー</div>
+        <div id="strategies"></div>
+      </div>
+      <div class="card">
+        <div class="card-h">本日の通知 <span id="err-count" class="dim"></span></div>
+        <div id="notices"></div>
+      </div>
     </div>
   </section>
 
-  <!-- 成績 -->
-  <section id="view-perf" class="view" hidden>
-    <div class="filters">
-      <div class="seg" id="perf-kind">
-        <button data-v="paper" class="on">仮想売買</button><button data-v="real">実売買</button>
+  <!-- 実売買 -->
+  <section id="view-real" class="view zone real" hidden>
+    <div class="zone-h"><span class="kind-tag real">実売買</span>実際の口座の約定だけ（自動売買）</div>
+    <div class="card">
+      <div class="card-h">現在の建玉 <span id="real-pos-at" class="dim"></span></div>
+      <div id="real-pos-summary" class="kpis"></div>
+      <div id="real-positions"></div>
+    </div>
+    <div class="filters" id="real-filters">
+      <div class="seg" data-range>
+        <button data-v="week">今週</button><button data-v="month">今月</button><button data-v="last">先月</button><button data-v="all" class="on">全期間</button><button data-v="custom">指定</button>
       </div>
-      <div class="seg" id="perf-range">
-        <button data-v="week">今週</button><button data-v="month" class="on">今月</button><button data-v="last">先月</button><button data-v="all">全期間</button><button data-v="custom">指定</button>
+      <div class="range" data-custom hidden>
+        <input type="date" data-from> 〜 <input type="date" data-to>
       </div>
-      <div class="range" id="perf-custom" hidden>
-        <input type="date" id="perf-from"> 〜 <input type="date" id="perf-to">
-      </div>
-      <label class="check"><input type="checkbox" id="perf-est"> 推計(IF補完)を含める</label>
     </div>
     <div class="card">
-      <div class="card-h">累積損益率（%の単純合計） <span id="perf-period" class="dim"></span></div>
-      <div id="perf-chart" class="chart"></div>
-      <div id="perf-legend" class="legend"></div>
+      <div class="card-h">成績 <span class="dim" data-period></span></div>
+      <div id="real-summary" class="kpis"></div>
+      <div id="real-chart" class="chart"></div>
+      <div id="real-legend" class="legend"></div>
     </div>
-    <div id="perf-list"></div>
+    <div id="real-strategies"></div>
+    <div class="card">
+      <div class="card-h">売買履歴</div>
+      <div id="real-trades"></div>
+    </div>
+    <div class="card">
+      <div class="card-h">発注・取消の記録</div>
+      <div id="real-orders"></div>
+    </div>
   </section>
 
-  <!-- 履歴 -->
-  <section id="view-trades" class="view" hidden>
-    <div class="filters">
-      <div class="seg" id="tr-kind">
-        <button data-v="paper" class="on">仮想売買</button><button data-v="real">実売買</button>
+  <!-- 仮想売買 -->
+  <section id="view-paper" class="view zone paper" hidden>
+    <div class="zone-h"><span class="kind-tag paper">仮想売買</span>シミュレーション・発注なし</div>
+    <div class="filters" id="paper-filters">
+      <div class="seg" data-range>
+        <button data-v="week">今週</button><button data-v="month">今月</button><button data-v="last">先月</button><button data-v="all" class="on">全期間</button><button data-v="custom">指定</button>
       </div>
-      <div class="range">
-        <input type="date" id="tr-from"> 〜 <input type="date" id="tr-to">
+      <div class="range" data-custom hidden>
+        <input type="date" data-from> 〜 <input type="date" data-to>
       </div>
-      <select id="tr-strategy"><option value="">すべてのストラテジー</option></select>
+      <div class="seg" id="paper-sub">
+        <button data-v="perf" class="on">成績</button><button data-v="trades">履歴</button>
+      </div>
+      <label class="check"><input type="checkbox" id="paper-est"> 推計(IF補完)を含める</label>
+      <select id="paper-strategy" hidden><option value="">すべてのストラテジー</option></select>
     </div>
-    <div id="tr-list"></div>
-  </section>
-
-  <!-- 注文 -->
-  <section id="view-orders" class="view" hidden>
-    <div class="card">
-      <div class="card-h">本日の注文（口座から）</div>
-      <div id="orders-live"></div>
+    <div id="paper-perf">
+      <div class="card">
+        <div class="card-h">累積損益率（%の単純合計） <span class="dim" data-period></span></div>
+        <div id="paper-summary" class="kpis"></div>
+        <div id="paper-chart" class="chart"></div>
+        <div id="paper-legend" class="legend"></div>
+      </div>
+      <div id="paper-strategies"></div>
     </div>
-    <div class="card">
-      <div class="card-h">発注・取消の記録（ログから）</div>
-      <div id="orders-history"></div>
-    </div>
+    <div id="paper-trades" hidden></div>
   </section>
 
   <!-- レポート -->
@@ -116,9 +144,8 @@
 
 <nav class="tabs">
   <button data-view="home" class="on">状況</button>
-  <button data-view="perf">成績</button>
-  <button data-view="trades">履歴</button>
-  <button data-view="orders">注文</button>
+  <button data-view="real" class="t-real">実売買</button>
+  <button data-view="paper" class="t-paper">仮想売買</button>
   <button data-view="reports">レポート</button>
 </nav>
 

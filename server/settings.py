@@ -29,6 +29,11 @@ class Settings:
     account_stale_seconds: int = 90
 
     @property
+    def last_account_path(self) -> str:
+        # ランナー停止中にも建玉を見せるための、最後に見えた口座の写し（DBの隣）
+        return os.path.join(os.path.dirname(self.db_path), "account_last.json")
+
+    @property
     def runner_dir(self) -> str:
         return os.path.join(self.mue_root, "strategies", "runner")
 

@@ -40,22 +40,64 @@ def _read_yaml(path):
 
 # ── 口座 ──────────────────────────────────────────────
 
-def account(settings) -> dict:
-    """ランナーが15秒ごとに書く account.json をそのまま返す（＋鮮度）。
+def _age(snap):
+    try:
+        return (datetime.now() - datetime.fromisoformat(snap["updated_at"])).total_seconds()
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def account(settings, conn=None) -> dict:
+    """口座の状態。ランナー稼働中は account.json（15秒ごと）、停止中は最後に保存した値。
 
     ランナー停止中はファイルが無い（終了時に消す）。異常終了で残った古い
     ファイルを「いまの値」と見せないよう、更新時刻で鮮度を判定する。
+    停止中に何も出せないと建玉が分からないので、稼働中に見えた最後の値を
+    data/account_last.json に残しておき（save_last_account）、それを返す。
+    source: "live"=いまの値 / "saved"=最後に保存した値 / None=どちらも無い
     """
     snap = _read_json(settings.account_path)
-    if not snap:
-        return {"available": False, "fresh": False, "snapshot": None, "age_seconds": None}
-    age = None
-    try:
-        age = (datetime.now() - datetime.fromisoformat(snap["updated_at"])).total_seconds()
-    except (KeyError, TypeError, ValueError):
-        pass
+    age = _age(snap) if snap else None
     fresh = age is not None and age <= settings.account_stale_seconds
-    return {"available": True, "fresh": fresh, "age_seconds": age, "snapshot": snap}
+    source = "live" if fresh else None
+    if not fresh:
+        saved = _read_json(settings.last_account_path)
+        if saved and (not snap or saved.get("updated_at", "") >= snap.get("updated_at", "")):
+            snap, age = saved, _age(saved)
+        if snap:
+            source = "saved"
+    if snap and conn is not None:
+        _mark_auto_positions(conn, snap)
+    return {"available": bool(snap), "fresh": fresh, "source": source,
+            "age_seconds": age, "snapshot": snap}
+
+
+def _mark_auto_positions(conn, snap):
+    """建玉ごとに、自動売買が建てたもの（ログの「建玉成立」で未決済）かを添える。"""
+    for p in snap.get("positions") or []:
+        row = conn.execute(
+            "SELECT strategy, entry_at, entry_price FROM real_trades"
+            " WHERE symbol=? AND exit_at IS NULL ORDER BY entry_at DESC LIMIT 1",
+            (p.get("symbol"),)).fetchone()
+        p["auto"] = ({"strategy": row["strategy"], "label": label(row["strategy"]),
+                      "entry_at": row["entry_at"]} if row else None)
+
+
+def save_last_account(settings) -> bool:
+    """稼働中の account.json を data/account_last.json に写す。写したら True。"""
+    snap = _read_json(settings.account_path)
+    age = _age(snap) if snap else None
+    if age is None or age > settings.account_stale_seconds:
+        return False
+    last = _read_json(settings.last_account_path)
+    if last and last.get("updated_at") == snap.get("updated_at"):
+        return False
+    os.makedirs(os.path.dirname(settings.last_account_path), exist_ok=True)
+    tmp = settings.last_account_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(snap, f, ensure_ascii=False)
+    os.replace(tmp, settings.last_account_path)
+    return True
 
 
 # ── 稼働状況 ──────────────────────────────────────────

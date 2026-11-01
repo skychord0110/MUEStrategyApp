@@ -49,7 +49,7 @@ function showError(where, err) {
 
 // ── タブ ─────────────────────────────────────────────
 
-const TITLES = { home: "状況", perf: "成績", trades: "履歴", orders: "注文", reports: "レポート" };
+const TITLES = { home: "状況", real: "実売買", paper: "仮想売買", reports: "レポート" };
 let current = "home";
 
 function show(view) {
@@ -79,23 +79,59 @@ function segment(id, onChange) {
 const STATE = { 1: "待機", 2: "処理中", 3: "処理済", 4: "訂正取消送信中", 5: "終了" };
 const SIDE = { 1: "売", 2: "買" };
 
+// 実売買／仮想売買の札（どの一覧でも同じ見た目で区別する）
+const kindMini = (kind) => el("span", { class: "kind-mini " + kind }, kind === "real" ? "実" : "仮想");
+
 function orderRows(orders) {
   if (!orders || !orders.length) return [empty("注文はありません")];
   return orders.map((o) => el("div", { class: "row" },
     el("div", { class: "l" },
-      el("div", { class: "t" }, `${o.symbol} ${o.name || ""}`),
+      el("div", { class: "t" }, kindMini("real"), `${o.symbol} ${o.name || ""}`),
       el("div", { class: "s" }, `${SIDE[o.side] || o.side} ${num(o.qty)}株 ${o.price ? num(o.price, 1) + "円" : "成行"} ・ ${hm(o.recv_time)}`)),
     el("div", { class: "r" },
       el("span", { class: "chip" + (o.state === 5 ? "" : " warn") }, STATE[o.state] || o.state),
       el("div", { class: "s" }, `約定 ${num(o.filled)}/${num(o.qty)}`))));
 }
 
+// 口座の値が「いまの値」か「ランナー停止中の最後の値」かを文字にする
+function accountWhen(acc) {
+  const s = acc.snapshot;
+  if (!s) return "（まだ記録がありません。ランナー稼働中に記録されます）";
+  return acc.source === "live"
+    ? `${hm(s.updated_at)} 時点`
+    : `${md(s.updated_at)} ${hm(s.updated_at)} 時点の最終値（ランナー停止中）`;
+}
+
+// 建玉の一覧。自動売買が建てたもの（ログの「建玉成立」で未決済）には戦略名を付ける
+function positionRows(acc) {
+  const s = acc.snapshot;
+  if (!s) return [empty("建玉の情報はまだありません")];
+  const pos = s.positions || [];
+  const out = [];
+  if (s.error) out.push(el("div", { class: "alert ng" }, s.error));
+  if (!pos.length) out.push(empty("保有している建玉はありません"));
+  for (const p of pos) {
+    const value = p.current != null ? p.current * p.qty : null;
+    out.push(el("div", { class: "row" },
+      el("div", { class: "l" },
+        el("div", { class: "t" }, kindMini("real"), `${p.symbol} ${p.name}`),
+        el("div", { class: "s" }, `${num(p.qty)}株 ・ 取得 ${num(p.price, 1)}円 → 現在 ${num(p.current, 1)}円`),
+        el("div", { class: "s" }, `評価額 ${yen(value)}`),
+        el("div", {}, p.auto
+          ? el("span", { class: "chip auto" }, `自動売買: ${p.auto.label}（${md(p.auto.entry_at)}〜）`)
+          : el("span", { class: "chip" }, "手動・その他"))),
+      el("div", { class: "r" }, signedYen(p.pl), el("div", { class: "s" }, pct(p.pl_rate)))));
+  }
+  return out;
+}
+
 async function loadHome() {
-  let st, acc, today;
+  let st, acc, today, ord;
   try {
-    [st, acc, today] = await Promise.all([
+    [st, acc, today, ord] = await Promise.all([
       api("/api/status"), api("/api/account"),
       api(`/api/trades?kind=paper&from=${ymd(new Date())}&to=${ymd(new Date())}`),
+      api(`/api/orders?from=${ymd(new Date())}`),
     ]);
   } catch (e) { return showError("home-alert", e); }
 
@@ -104,28 +140,20 @@ async function loadHome() {
   badge.textContent = st.runner_running ? "ランナー稼働中" : "ランナー停止中";
 
   const alerts = [];
-  if (acc.available && !acc.fresh) alerts.push(el("div", { class: "alert" }, `口座の情報が古くなっています（${Math.round(acc.age_seconds / 60)}分前）。ランナーが止まっている可能性があります`));
   const outage = st.notices.find((n) => n.kind === "runner_notice" && n.text.includes("応答しません"));
   if (outage) alerts.push(el("div", { class: "alert ng" }, `${hm(outage.at)} ${outage.text}`));
   fill("home-alert", alerts);
 
-  // 口座
-  const s = acc.fresh ? acc.snapshot : null;
-  $("acc-age").textContent = s ? `${hm(s.updated_at)} 時点` : acc.available ? "（古い値）" : "（ランナー停止中）";
+  // 実売買: 口座・建玉
+  const s = acc.snapshot;
+  $("acc-age").textContent = accountWhen(acc);
   $("acc-total").textContent = s ? yen(s.total_assets) : "—";
   $("acc-bp").textContent = s ? yen(s.buying_power) : "—";
   fill("acc-pl", s ? signedYen(s.total_pl) : "—");
-  const pos = s ? s.positions : [];
-  fill("acc-positions", el("div", { class: "rows" },
-    s && s.error ? el("div", { class: "alert ng" }, s.error) : null,
-    pos.length ? pos.map((p) => el("div", { class: "row" },
-      el("div", { class: "l" },
-        el("div", { class: "t" }, `${p.symbol} ${p.name}`),
-        el("div", { class: "s" }, `${num(p.qty)}株 @${num(p.price, 1)} → ${num(p.current, 1)}`)),
-      el("div", { class: "r" }, signedYen(p.pl), el("div", { class: "s" }, pct(p.pl_rate))))) :
-      s ? empty("保有している建玉はありません") : null));
+  $("home-pos-count").textContent = s ? `${(s.positions || []).length}件` : "";
+  fill("home-positions", el("div", { class: "rows" }, positionRows(acc)));
 
-  // 自動売買
+  // 実売買: 自動売買の設定
   const at = st.config.autotrade;
   const mode = !at.enabled ? ["無効", ""] : at.dry_run ? ["DRY-RUN（発注なし）", "warn"] : ["実発注", "real"];
   fill("autotrade",
@@ -133,14 +161,16 @@ async function loadHome() {
       at.strategies.length ? "対象: " + at.strategies.map((k) => labelOf(st, k)).join("、") : "対象なし"),
     st.autotrade_mode ? el("div", { class: "s dim" }, `ランナー起動時: ${st.autotrade_mode.text}（${md(st.autotrade_mode.at)} ${hm(st.autotrade_mode.at)}）`) : null);
 
-  // 本日の仮想売買
+  // 実売買: 本日の注文
+  $("orders-today-at").textContent = ord.today_source === "saved" ? `${hm(ord.today_at)} 時点の最終値` : "";
+  fill("orders-today", el("div", { class: "rows" }, ord.today ? orderRows(ord.today) : empty("本日の注文の情報はありません（ランナー停止中）")));
+
+  // 仮想売買: 本日
   const pt = st.paper_today;
   $("pt-entries").textContent = num(pt.entries);
   $("pt-holding").textContent = num(pt.holding || 0);
   fill("pt-ret", pt.total_return == null ? "—" : signed(pt.total_return, pct));
-  fill("pt-today", el("div", { class: "rows" }, today.length ? today.map(tradeRow) : empty("本日のエントリーはまだありません")));
-
-  fill("orders-today", el("div", { class: "rows" }, s ? orderRows(s.orders) : empty("ランナー停止中のため取得できません")));
+  fill("pt-today", el("div", { class: "rows" }, today.length ? today.map((t) => tradeRow(t, "paper")) : empty("本日のエントリーはまだありません")));
 
   fill("strategies", el("div", {}, st.config.strategies.map((x) =>
     el("span", { class: "chip" + (x.enabled ? " on" : "") }, x.label))));
@@ -152,6 +182,7 @@ async function loadHome() {
       el("div", {}, n.text)))) : empty("ありません")));
 }
 
+let STRATEGIES = null;     // ストラテジー一覧（status から一度だけ読む）
 function labelOf(st, key) {
   const x = st.config.strategies.find((s) => s.key === key);
   return x ? x.label : key;
@@ -159,12 +190,12 @@ function labelOf(st, key) {
 
 // ── 売買1件 ───────────────────────────────────────────
 
-function tradeRow(t) {
+function tradeRow(t, kind) {
   const open = t.exit_at == null;
   const stale = open && t.trade_date < ymd(new Date());
   return el("div", { class: "row" },
     el("div", { class: "l" },
-      el("div", { class: "t" }, t.symbol, " ", el("span", { class: "s" }, t.label)),
+      el("div", { class: "t" }, kindMini(kind), t.symbol, " ", el("span", { class: "s" }, t.label || "")),
       el("div", { class: "s" },
         `${md(t.entry_at)} ${hm(t.entry_at)} ${num(t.entry_price, 1)}円`,
         open ? "" : ` → ${hm(t.exit_at)} ${num(t.exit_price, 1)}円`,
@@ -177,67 +208,86 @@ function tradeRow(t) {
       el("div", { class: "s" }, t.exit_reason || "")));
 }
 
-// ── 成績 ─────────────────────────────────────────────
+// ── 期間の選択（実売買・仮想売買のタブで共通） ──────────
 
-const COLORS = ["#4a9eff", "#4ade80", "#f0a040", "#e879f9", "#f0605e", "#22d3ee", "#facc15", "#a3a3a3", "#fb7185", "#818cf8"];
-
-function rangeOf(kind) {
+function rangeOf(root) {
+  const v = root.querySelector("[data-range] button.on").dataset.v;
   const now = new Date();
-  if (kind === "week") {
+  if (v === "week") {
     const d = new Date(now); d.setDate(now.getDate() - ((now.getDay() + 6) % 7));
     return [ymd(d), ymd(now)];
   }
-  if (kind === "month") return [ymd(new Date(now.getFullYear(), now.getMonth(), 1)), ymd(now)];
-  if (kind === "last") return [ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)), ymd(new Date(now.getFullYear(), now.getMonth(), 0))];
-  if (kind === "custom") return [$("perf-from").value, $("perf-to").value];
+  if (v === "month") return [ymd(new Date(now.getFullYear(), now.getMonth(), 1)), ymd(now)];
+  if (v === "last") return [ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)), ymd(new Date(now.getFullYear(), now.getMonth(), 0))];
+  if (v === "custom") return [root.querySelector("[data-from]").value, root.querySelector("[data-to]").value];
   return ["", ""];
 }
 
-const perfKind = segment("perf-kind", () => loadPerf());
-const perfRange = segment("perf-range", (v) => { $("perf-custom").hidden = v !== "custom"; loadPerf(); });
-$("perf-from").addEventListener("change", loadPerf);
-$("perf-to").addEventListener("change", loadPerf);
-$("perf-est").addEventListener("change", loadPerf);
-
-async function loadPerf() {
-  const kind = perfKind();
-  const [from, to] = rangeOf(perfRange());
-  const q = new URLSearchParams({ kind });
-  if (from) q.set("from", from);
-  if (to) q.set("to", to);
-  if ($("perf-est").checked) q.set("estimated", "true");
-  $("perf-est").parentElement.hidden = kind !== "paper";
-  let p;
-  try { p = await api("/api/performance?" + q); } catch (e) { return showError("perf-list", e); }
-  $("perf-period").textContent = from || to ? `${from || "最初"} 〜 ${to || "今日"}` : "全期間";
-
-  const colorOf = {};
-  p.strategies.forEach((s, i) => (colorOf[s.strategy] = COLORS[i % COLORS.length]));
-  drawChart(p, colorOf);
-
-  fill("perf-list", p.strategies.length ? p.strategies.map((s) => el("div", { class: "card" },
-    el("div", { class: "card-h" }, el("i", { class: "swatch" }), s.label,
-      el("span", { class: "dim" }, `${s.closed}件${s.open ? `・未決済${s.open}` : ""}`)),
-    el("div", { class: "stat-grid" },
-      kpi("勝率", s.win_rate == null ? "—" : num(s.win_rate, 1) + "%"),
-      kpi("平均", signed(s.avg_return, pct)),
-      kpi("合計", signed(s.total_return, (v) => pct(v, 1))),
-      kind === "real" ? kpi("損益", signedYen(s.pnl)) : kpi("勝/負", `${s.wins || 0}/${s.losses || 0}`)),
-    el("div", { class: "s dim" },
-      `最大 ${pct(s.best)} ・ 最小 ${pct(s.worst)}`,
-      Object.keys(s.exit_reasons).length ? " ・ " + Object.entries(s.exit_reasons).map(([k, v]) => `${k}${v}`).join(" ") : ""))
-  ) : el("div", { class: "card" }, empty("この期間の売買はありません")));
-  // 凡例の色（CSPでstyle属性を使わないため、CSSOMで入れる）
-  document.querySelectorAll("#perf-list .swatch").forEach((sw, i) => {
-    Object.assign(sw.style, { display: "inline-block", width: "10px", height: "10px", borderRadius: "3px", background: colorOf[p.strategies[i].strategy] });
+function periodFilter(rootId, onChange) {
+  const root = $(rootId);
+  const seg = root.querySelector("[data-range]");
+  const custom = root.querySelector("[data-custom]");
+  root.querySelector("[data-to]").value = ymd(new Date());
+  seg.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    if (!b) return;
+    for (const x of seg.querySelectorAll("button")) x.classList.toggle("on", x === b);
+    custom.hidden = b.dataset.v !== "custom";
+    onChange();
   });
+  for (const i of custom.querySelectorAll("input")) i.addEventListener("change", onChange);
+  return () => rangeOf(root);
 }
+
+function periodText(from, to) {
+  return from || to ? `${from || "最初"} 〜 ${to || "今日"}` : "全期間";
+}
+
+function setPeriodLabels(viewId, text) {
+  for (const x of $(viewId).querySelectorAll("[data-period]")) x.textContent = text;
+}
+
+// ── 成績（実売買・仮想売買で共通の描き方） ────────────────
+
+const COLORS = ["#4a9eff", "#4ade80", "#f0a040", "#e879f9", "#f0605e", "#22d3ee", "#facc15", "#a3a3a3", "#fb7185", "#818cf8"];
 
 function kpi(k, v) {
   return el("div", { class: "kpi" }, el("div", { class: "k" }, k), el("div", { class: "v" }, v));
 }
 
-function drawChart(p, colorOf) {
+function renderPerf(kind, p) {
+  const colorOf = {};
+  p.strategies.forEach((s, i) => (colorOf[s.strategy] = COLORS[i % COLORS.length]));
+  drawChart(p, colorOf, kind + "-chart", kind + "-legend");
+
+  // 全体の集計
+  const closed = p.strategies.reduce((a, s) => a + s.closed, 0);
+  const wins = p.strategies.reduce((a, s) => a + (s.wins || 0), 0);
+  const total = p.strategies.reduce((a, s) => a + (s.total_return || 0), 0);
+  const pnl = p.strategies.reduce((a, s) => a + (s.pnl || 0), 0);
+  fill(kind + "-summary",
+    kpi("件数", `${closed}件`),
+    kpi("勝率", closed ? num((wins / closed) * 100, 1) + "%" : "—"),
+    kind === "real" ? kpi("損益", closed ? signedYen(pnl) : "—") : kpi("損益率合計", closed ? signed(total, (v) => pct(v, 1)) : "—"));
+
+  fill(kind + "-strategies", p.strategies.length ? p.strategies.map((s) => {
+    const sw = el("i");
+    Object.assign(sw.style, { display: "inline-block", width: "10px", height: "10px", borderRadius: "3px", background: colorOf[s.strategy] });
+    return el("div", { class: "card" },
+      el("div", { class: "card-h" }, kindMini(kind), sw, s.label,
+        el("span", { class: "dim" }, `${s.closed}件${s.open ? `・未決済${s.open}` : ""}`)),
+      el("div", { class: "stat-grid" },
+        kpi("勝率", s.win_rate == null ? "—" : num(s.win_rate, 1) + "%"),
+        kpi("平均", signed(s.avg_return, pct)),
+        kpi("合計", signed(s.total_return, (v) => pct(v, 1))),
+        kind === "real" ? kpi("損益", signedYen(s.pnl)) : kpi("勝/負", `${s.wins || 0}/${s.losses || 0}`)),
+      el("div", { class: "s dim" },
+        `最大 ${pct(s.best)} ・ 最小 ${pct(s.worst)}`,
+        Object.keys(s.exit_reasons).length ? " ・ " + Object.entries(s.exit_reasons).map(([k, v]) => `${k}${v}`).join(" ") : ""));
+  }) : el("div", { class: "card" }, empty("この期間の売買はありません")));
+}
+
+function drawChart(p, colorOf, chartId, legendId) {
   const NS = "http://www.w3.org/2000/svg";
   const svgEl = (tag, attrs, ...kids) => {
     const e = document.createElementNS(NS, tag);
@@ -246,7 +296,7 @@ function drawChart(p, colorOf) {
     return e;
   };
   const dates = [...new Set(p.daily.map((d) => d.trade_date))];
-  if (!dates.length) { fill("perf-chart", empty("データがありません")); fill("perf-legend"); return; }
+  if (!dates.length) { fill(chartId, empty("データがありません")); fill(legendId); return; }
 
   // 戦略ごとの累積
   const series = {};
@@ -278,71 +328,104 @@ function drawChart(p, colorOf) {
     svgEl("text", { x: W - R, y: H - 4, "text-anchor": "end" }, md(dates[dates.length - 1])));
   for (const [k, v] of lines) svg.append(svgEl("path", { d: path(v), fill: "none", stroke: colorOf[k], "stroke-width": 1.4, "stroke-opacity": 0.85 }));
   svg.append(svgEl("path", { d: path(totalLine), fill: "none", stroke: "currentColor", "stroke-width": 2.4 }));
-  fill("perf-chart", svg);
+  for (let i = 0; i < totalLine.length; i++) {
+    if (dates.length <= 12) svg.append(svgEl("circle", { cx: x(i), cy: y(totalLine[i]), r: 2.5, fill: "currentColor" }));
+  }
+  fill(chartId, svg);
 
   const legendItem = (color, text) => {
     const i = el("i");
     i.style.background = color;
     return el("span", {}, i, text);
   };
-  fill("perf-legend", legendItem("currentColor", `合計 ${pct(totalLine[totalLine.length - 1], 1)}`),
+  fill(legendId, legendItem("currentColor", `合計 ${pct(totalLine[totalLine.length - 1], 1)}`),
     p.strategies.map((s) => legendItem(colorOf[s.strategy], s.label)));
 }
 
-// ── 履歴 ─────────────────────────────────────────────
-
-const trKind = segment("tr-kind", () => loadTrades());
-for (const id of ["tr-from", "tr-to", "tr-strategy"]) $(id).addEventListener("change", loadTrades);
-{
-  const now = new Date();
-  $("tr-from").value = ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 13));
-  $("tr-to").value = ymd(now);
-  $("perf-to").value = ymd(now);
-}
-
-async function loadTrades() {
-  const q = new URLSearchParams({ kind: trKind() });
-  if ($("tr-from").value) q.set("from", $("tr-from").value);
-  if ($("tr-to").value) q.set("to", $("tr-to").value);
-  if ($("tr-strategy").value) q.set("strategy", $("tr-strategy").value);
-  q.set("estimated", "true");
-  let rows;
-  try {
-    rows = await api("/api/trades?" + q);
-    if ($("tr-strategy").options.length === 1) {
-      const st = await api("/api/status");
-      for (const s of st.config.strategies) $("tr-strategy").append(el("option", { value: s.key }, s.label));
-    }
-  } catch (e) { return showError("tr-list", e); }
-  // 日付ごとにまとめる
+function tradesByDate(rows, kind) {
   const byDate = new Map();
   for (const t of rows) {
     if (!byDate.has(t.trade_date)) byDate.set(t.trade_date, []);
     byDate.get(t.trade_date).push(t);
   }
-  fill("tr-list", byDate.size ? [...byDate].map(([d, ts]) => {
+  return byDate.size ? [...byDate].map(([d, ts]) => {
     const closed = ts.filter((t) => t.return_pct != null);
     const sum = closed.reduce((a, t) => a + t.return_pct, 0);
     return el("div", { class: "card" },
-      el("div", { class: "card-h" }, d, el("span", { class: "dim" }, `${ts.length}件`),
+      el("div", { class: "card-h" }, kindMini(kind), d, el("span", { class: "dim" }, `${ts.length}件`),
         closed.length ? signed(sum, (v) => pct(v, 1)) : null),
-      el("div", { class: "rows" }, ts.map(tradeRow)));
-  }) : el("div", { class: "card" }, empty("この期間の売買はありません")));
+      el("div", { class: "rows" }, ts.map((t) => tradeRow(t, kind))));
+  }) : [el("div", { class: "card" }, empty("この期間の売買はありません"))];
 }
 
-// ── 注文 ─────────────────────────────────────────────
+// ── 実売買タブ ────────────────────────────────────────
 
-async function loadOrders() {
-  let o;
-  try { o = await api("/api/orders"); } catch (e) { return showError("orders-live", e); }
-  fill("orders-live", el("div", { class: "rows" }, o.today ? orderRows(o.today) : empty("ランナー停止中のため取得できません")));
-  fill("orders-history", el("div", { class: "rows" }, o.history.length ? o.history.map((h) =>
+const realRange = periodFilter("real-filters", () => loadReal());
+
+async function loadReal() {
+  const [from, to] = realRange();
+  const q = new URLSearchParams({ kind: "real" });
+  const oq = new URLSearchParams();
+  if (from) { q.set("from", from); oq.set("from", from); }
+  if (to) { q.set("to", to); oq.set("to", to); }
+  let acc, perf, rows, ord;
+  try {
+    [acc, perf, rows, ord] = await Promise.all([
+      api("/api/account"), api("/api/performance?" + q), api("/api/trades?" + q), api("/api/orders?" + oq),
+    ]);
+  } catch (e) { return showError("real-positions", e); }
+
+  // 現在の建玉（期間に関係なく、いまの口座）
+  const s = acc.snapshot;
+  $("real-pos-at").textContent = accountWhen(acc);
+  const pos = s ? s.positions || [] : [];
+  const value = pos.reduce((a, p) => a + (p.current || 0) * p.qty, 0);
+  fill("real-pos-summary", s ? [kpi("建玉", `${pos.length}件`), kpi("評価額", yen(value)), kpi("評価損益", signedYen(s.total_pl))] : []);
+  fill("real-positions", el("div", { class: "rows" }, positionRows(acc)));
+
+  setPeriodLabels("view-real", periodText(from, to));
+  renderPerf("real", perf);
+  fill("real-trades", el("div", { class: "rows" }, rows.length ? rows.map((t) => tradeRow(t, "real")) : empty("この期間の実売買はありません")));
+  fill("real-orders", el("div", { class: "rows" }, ord.history.length ? ord.history.map((h) =>
     el("div", { class: "row" },
       el("div", { class: "l" },
-        el("div", { class: "t" }, `${h.symbol || ""} ${h.side || ""} ${h.qty != null ? num(h.qty) + "株" : ""}`.trim() || h.what),
+        el("div", { class: "t" }, kindMini("real"), `${h.symbol || ""} ${h.side || ""} ${h.qty != null ? num(h.qty) + "株" : ""}`.trim() || h.what),
         el("div", { class: "s" }, `${md(h.at)} ${hm(h.at)} ・ ${h.strategy || ""} ${h.note || h.text || ""}`)),
       el("div", { class: "r" }, el("span", { class: "chip" + (/失敗|エラー/.test(h.what) ? " real" : "") }, h.what),
-        h.price != null ? el("div", { class: "s" }, num(h.price, 1) + "円") : null))) : empty("記録はありません")));
+        h.price != null ? el("div", { class: "s" }, num(h.price, 1) + "円") : null))) : empty("この期間の記録はありません")));
+}
+
+// ── 仮想売買タブ ──────────────────────────────────────
+
+const paperRange = periodFilter("paper-filters", () => loadPaper());
+const paperSub = segment("paper-sub", (v) => {
+  $("paper-perf").hidden = v !== "perf";
+  $("paper-trades").hidden = v !== "trades";
+  $("paper-strategy").hidden = v !== "trades";
+  loadPaper();
+});
+$("paper-est").addEventListener("change", () => loadPaper());
+$("paper-strategy").addEventListener("change", () => loadPaper());
+
+async function loadPaper() {
+  const [from, to] = paperRange();
+  const q = new URLSearchParams({ kind: "paper" });
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  if ($("paper-est").checked) q.set("estimated", "true");
+  setPeriodLabels("view-paper", periodText(from, to));
+  try {
+    if (!STRATEGIES) {
+      STRATEGIES = (await api("/api/status")).config.strategies;
+      for (const s of STRATEGIES) $("paper-strategy").append(el("option", { value: s.key }, s.label));
+    }
+    if (paperSub() === "perf") {
+      renderPerf("paper", await api("/api/performance?" + q));
+    } else {
+      if ($("paper-strategy").value) q.set("strategy", $("paper-strategy").value);
+      fill("paper-trades", tradesByDate(await api("/api/trades?" + q), "paper"));
+    }
+  } catch (e) { return showError(paperSub() === "perf" ? "paper-strategies" : "paper-trades", e); }
 }
 
 // ── レポート ──────────────────────────────────────────
@@ -424,11 +507,12 @@ function renderMarkdown(src) {
 
 // ── 起動 ─────────────────────────────────────────────
 
-const LOADERS = { home: loadHome, perf: loadPerf, trades: loadTrades, orders: loadOrders, reports: loadReports };
+const LOADERS = { home: loadHome, real: loadReal, paper: loadPaper, reports: loadReports };
 
-// 状況タブを開いているあいだは15秒ごとに更新（ランナーの書き出し間隔と同じ）
-setInterval(() => { if (current === "home" && !document.hidden) loadHome(); }, 15000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden && current === "home") loadHome(); });
+// 状況・実売買タブを開いているあいだは15秒ごとに更新（ランナーの書き出し間隔と同じ）
+const AUTO_REFRESH = { home: loadHome, real: loadReal };
+setInterval(() => { if (AUTO_REFRESH[current] && !document.hidden) AUTO_REFRESH[current](); }, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && AUTO_REFRESH[current]) AUTO_REFRESH[current](); });
 
 let start = "home";
 try { start = localStorage.getItem("view") || "home"; } catch (e) { /* 既定のまま */ }

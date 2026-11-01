@@ -17,6 +17,7 @@ import sqlite3
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -32,17 +33,28 @@ LOGIN_HEADER = "Tailscale-User-Login"
 _DATE = r"^\d{4}-\d{2}-\d{2}$"
 
 
+# 口座の写しを取る間隔（秒）。ランナーの書き出し間隔（15秒）に合わせる
+ACCOUNT_SAVE_INTERVAL = 15
+
+
 def _ingest_loop(settings, stop: threading.Event):
     conn = db.connect(settings.db_path)
+    next_ingest = 0.0
     try:
         while True:
             try:
-                counts = ingest.run(conn, settings)
-                if any(counts.values()):
-                    log.info("取り込み: %s", counts)
+                queries.save_last_account(settings)
             except Exception:
-                log.exception("取り込みに失敗しました（次の周期でやり直します）")
-            if stop.wait(settings.ingest_interval_seconds):
+                log.exception("口座の写しを保存できませんでした")
+            if time.monotonic() >= next_ingest:
+                next_ingest = time.monotonic() + settings.ingest_interval_seconds
+                try:
+                    counts = ingest.run(conn, settings)
+                    if any(counts.values()):
+                        log.info("取り込み: %s", counts)
+                except Exception:
+                    log.exception("取り込みに失敗しました（次の周期でやり直します）")
+            if stop.wait(ACCOUNT_SAVE_INTERVAL):
                 return
     finally:
         conn.close()
@@ -86,6 +98,9 @@ def create_app(settings=None, run_ingest: bool = True) -> FastAPI:
             "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
         if request.url.path.startswith("/api/"):
             h["Cache-Control"] = "no-store"
+        else:
+            # 画面の部品は毎回更新を確かめさせる（更新したのに古いJSが動き続けないように）
+            h["Cache-Control"] = "no-cache"
         return response
 
     def conn():
@@ -110,7 +125,8 @@ def create_app(settings=None, run_ingest: bool = True) -> FastAPI:
 
     @app.get("/api/account")
     def account():
-        return queries.account(settings)
+        with conn() as c:
+            return queries.account(settings, c)
 
     @app.get("/api/trades")
     def trades(kind: str = "paper",
@@ -135,9 +151,14 @@ def create_app(settings=None, run_ingest: bool = True) -> FastAPI:
     def orders(date_from: Optional[str] = Query(None, alias="from", pattern=_DATE),
                date_to: Optional[str] = Query(None, alias="to", pattern=_DATE)):
         acc = queries.account(settings)
-        live = (acc["snapshot"] or {}).get("orders") if acc["fresh"] else None
+        snap = acc["snapshot"] or {}
+        # 停止中でも、最後の値が今日のものなら今日の注文として出す（source で区別できる）
+        today = (snap.get("orders") if snap.get("updated_at", "")[:10] == date.today().isoformat()
+                 else None)
         with conn() as c:
-            return {"today": live, "history": queries.order_history(c, date_from, date_to)}
+            return {"today": today, "today_source": acc["source"] if today is not None else None,
+                    "today_at": snap.get("updated_at") if today is not None else None,
+                    "history": queries.order_history(c, date_from, date_to)}
 
     @app.get("/api/reports")
     def reports():

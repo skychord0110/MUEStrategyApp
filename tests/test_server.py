@@ -182,8 +182,60 @@ def test_reports_stay_inside_output_dir(client):
 
 def test_account_when_runner_stopped(client):
     a = client.get("/api/account", headers=ME).json()
-    assert a == {"available": False, "fresh": False, "snapshot": None, "age_seconds": None}
+    assert a == {"available": False, "fresh": False, "source": None, "snapshot": None,
+                 "age_seconds": None}
     assert client.get("/api/orders", headers=ME).json()["today"] is None
+
+
+def _write_account(env, updated_at, positions):
+    os.makedirs(os.path.dirname(env.account_path), exist_ok=True)
+    with open(env.account_path, "w", encoding="utf-8") as f:
+        json.dump({"updated_at": updated_at, "buying_power": 29426.0, "total_pl": -1200.0,
+                   "positions": positions, "orders": []}, f, ensure_ascii=False)
+
+
+POS_3803 = {"symbol": "3803", "name": "イメージ情報開発", "qty": 200.0, "price": 600.0,
+            "current": 594.0, "pl": -1200.0, "pl_rate": -1.0, "side": "2"}
+
+
+def test_last_account_is_kept_after_runner_stops(env):
+    from datetime import datetime
+    from server import queries
+    now = datetime.now().isoformat(timespec="seconds")
+    _write_account(env, now, [POS_3803])
+    assert queries.save_last_account(env) is True
+    assert queries.save_last_account(env) is False          # 同じ値は書き直さない
+    assert queries.account(env)["source"] == "live"
+    os.remove(env.account_path)                              # ランナー停止（終了時に消える）
+    a = queries.account(env)
+    assert (a["source"], a["fresh"]) == ("saved", False)
+    assert a["snapshot"]["positions"][0]["symbol"] == "3803"
+
+
+def test_stale_account_is_not_saved(env):
+    from server import queries
+    _write_account(env, "2026-10-23T15:30:00", [POS_3803])   # 異常終了で残った古いファイル
+    assert queries.save_last_account(env) is False
+    a = queries.account(env)
+    assert (a["source"], a["fresh"]) == ("saved", False)     # 古い値として出す（いまの値とは言わない）
+
+
+def test_positions_are_marked_when_opened_by_autotrade(env):
+    from datetime import datetime
+    write(os.path.join(env.logs_dir, "runner_2026-09-02.log"), [
+        "2026-09-02 13:00:00,229 [WARNING] [afternoon_reversal] [実発注] 3803 買 200株 指値 600円 [エントリー(指値買い @600.0)]",
+        "2026-09-02 13:00:05,000 [INFO] [自動売買] 建玉成立 3803 200株 @600.0 [HOLDING] 目標612 損切り588 下限582",
+    ])
+    _write_account(env, datetime.now().isoformat(timespec="seconds"),
+                   [POS_3803, dict(POS_3803, symbol="7203", name="手で買った株")])
+    conn = db.connect(env.db_path)
+    ingest.run(conn, env)
+    conn.close()
+    c = TestClient(create_app(env, run_ingest=False))
+    pos = c.get("/api/account", headers=ME).json()["snapshot"]["positions"]
+    assert pos[0]["auto"] == {"strategy": "afternoon_reversal", "label": "AI午後引け戻り",
+                              "entry_at": "2026-09-02T13:00:05"}
+    assert pos[1]["auto"] is None
 
 
 def test_security_headers(client):
@@ -191,3 +243,4 @@ def test_security_headers(client):
     assert r.status_code == 200
     assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
     assert client.get("/api/status", headers=ME).headers["cache-control"] == "no-store"
+    assert client.get("/app.js", headers=ME).headers["cache-control"] == "no-cache"
